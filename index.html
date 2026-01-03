@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="fi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Klondyke Pasianssi</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Klondyke Pasianssi</h1>
+    <div class="controls">
+      <button id="newGame">Uusi peli</button>
+      <button id="undo" disabled>Peru</button>
+      <button id="autoMove">Auto</button>
+      <div id="score">Pisteet: 0</div>
+    </div>
+  </header>
+
+  <main>
+    <section class="top-row">
+      <div id="stock" class="pile">&nbsp;</div>
+      <div id="waste" class="pile">&nbsp;</div>
+      <div id="foundations" class="foundations">
+        <!-- 4 foundations -->
+        <div class="foundation" data-index="0"></div>
+        <div class="foundation" data-index="1"></div>
+        <div class="foundation" data-index="2"></div>
+        <div class="foundation" data-index="3"></div>
+      </div>
+    </section>
+
+    <section id="tableau" class="tableau">
+      <!-- 7 tableaus -->
+      <div class="pile" data-index="0"></div>
+      <div class="pile" data-index="1"></div>
+      <div class="pile" data-index="2"></div>
+      <div class="pile" data-index="3"></div>
+      <div class="pile" data-index="4"></div>
+      <div class="pile" data-index="5"></div>
+      <div class="pile" data-index="6"></div>
+    </section>
+  </main>
+
+  <template id="card-template">
+    <div class="card">
+      <div class="rank"></div>
+      <div class="suit"></div>
+    </div>
+  </template>
+
+  <script src="main.js" type="module"></script>
+</body>
+</html>

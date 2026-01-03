@@ -1,0 +1,33 @@
+:root{--card-w:72px;--card-h:96px;--bg:#0a6b2a;--card-bg:#fff}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:0;background:linear-gradient(180deg,#0b3 10%, #053 100%);color:#111}
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
+header h1{margin:0;font-size:1rem}
+.controls{display:flex;gap:8px;align-items:center}
+button{padding:6px 10px;border-radius:4px;border:1px solid rgba(0,0,0,.2);background:#fff}
+main{padding:16px}
+.top-row{display:flex;gap:12px;align-items:flex-start;margin-bottom:20px}
+.pile{width:var(--card-w);min-height:var(--card-h);border-radius:6px;background:rgba(255,255,255,0.06);position:relative;overflow:visible}
+.top-row .pile{display:flex;align-items:center;justify-content:center}
+.foundations{display:flex;gap:12px;margin-left:auto}
+.foundation{width:var(--card-w);min-height:var(--card-h);border-radius:6px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;cursor:pointer}
+.foundation:empty{border:1px dashed rgba(255,255,255,0.08)}
+.tableau{display:flex;gap:12px}
+.card{width:var(--card-w);height:var(--card-h);border-radius:6px;background:var(--card-bg);box-shadow:0 6px 12px rgba(0,0,0,.24);border:1px solid rgba(0,0,0,.08);display:flex;flex-direction:column;justify-content:space-between;padding:6px;cursor:pointer;transition:transform .12s,box-shadow .12s;user-select:none;-webkit-user-select:none;-ms-user-select:none}
+.card:hover{transform:translateY(-4px);box-shadow:0 10px 20px rgba(0,0,0,.28)}
+.card.face-down{background:#2b2b2b;border:1px solid rgba(0,0,0,.12)}
+.card .rank{font-weight:700}
+.card.red .rank,.card.red .suit{color:#b00}
+.card.black .rank,.card.black .suit{color:#111}
+.drag-clone{user-select:none;-webkit-user-select:none;-ms-user-select:none}
+.pile .card{position:relative}
+.tableau .pile{min-height:260px;padding:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));display:block}
+.tableau .pile .card{display:block;margin-top:12px}
+.tableau .pile .card:first-child{margin-top:0}
+.selected{outline:3px solid #ffd54f;border-radius:6px}
+.drag-layer{position:fixed;left:0;top:0;pointer-events:none;z-index:2500}
+.drag-clone{position:absolute;width:var(--card-w);height:var(--card-h);border-radius:6px;box-shadow:0 18px 36px rgba(0,0,0,.36);opacity:.98}
+.pile.drop-target{outline:3px dashed #ffd54f;border-radius:6px}
+.foundation.drop-target{outline:3px dashed #ffd54f;border-radius:6px}
+.card{touch-action:none}
+@media (max-width:640px){:root{--card-w:56px;--card-h:78px}.tableau{gap:6px}}
