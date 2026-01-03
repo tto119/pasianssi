@@ -1,4 +1,11 @@
-:root{--card-w:72px;--card-h:96px;--bg:#0a6b2a;--card-bg:#fff}
+:root{
+  --card-w: clamp(56px, 8.5vw, 160px);
+  --card-h: calc(var(--card-w) * 4 / 3);
+  --bg: #0a6b2a;
+  --card-bg: #fff;
+  --tableau-gap: clamp(8px, 2vw, 32px);
+  --card-vertical-spacing: clamp(10px, 1.6vw, 32px);
+}
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,Segoe UI,Roboto; margin:0;background:linear-gradient(180deg,#0b3 10%, #053 100%);color:#111}
 header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px}
@@ -15,7 +22,7 @@ main{padding:16px;display:flex;flex-direction:column;flex:1;min-height:0}
 .foundations{display:flex;gap:12px;margin-left:auto}
 .foundation{width:var(--card-w);min-height:var(--card-h);border-radius:6px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;cursor:pointer}
 .foundation:empty{border:1px dashed rgba(255,255,255,0.08)}
-.tableau{display:flex;gap:12px;align-items:stretch;height:100%}
+.tableau{display:flex;gap:var(--tableau-gap);align-items:stretch;height:100%}
 .tableau .pile{flex:1;min-height:0;padding:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));display:flex;flex-direction:column;overflow:auto}
 .card{width:var(--card-w);height:var(--card-h);border-radius:6px;background:var(--card-bg);box-shadow:0 6px 12px rgba(0,0,0,.24);border:1px solid rgba(0,0,0,.08);display:flex;flex-direction:column;justify-content:space-between;padding:6px;cursor:pointer;transition:transform .12s,box-shadow .12s;user-select:none;-webkit-user-select:none;-ms-user-select:none}
 .card:hover{transform:translateY(-4px);box-shadow:0 10px 20px rgba(0,0,0,.28)}
@@ -26,7 +33,7 @@ main{padding:16px;display:flex;flex-direction:column;flex:1;min-height:0}
 .drag-clone{user-select:none;-webkit-user-select:none;-ms-user-select:none}
 .pile .card{position:relative}
 .tableau .pile{min-height:260px;padding:8px;background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));display:block}
-.tableau .pile .card{display:block;margin-top:12px}
+.tableau .pile .card{display:block;margin-top:var(--card-vertical-spacing)}
 .tableau .pile .card:first-child{margin-top:0}
 .selected{outline:3px solid #ffd54f;border-radius:6px}
 .drag-layer{position:fixed;left:0;top:0;pointer-events:none;z-index:2500}
@@ -34,4 +41,12 @@ main{padding:16px;display:flex;flex-direction:column;flex:1;min-height:0}
 .pile.drop-target{outline:3px dashed #ffd54f;border-radius:6px}
 .foundation.drop-target{outline:3px dashed #ffd54f;border-radius:6px}
 .card{touch-action:none}
-@media (max-width:640px){:root{--card-w:56px;--card-h:78px}.tableau{gap:6px}}
+@media (max-width:640px){
+  :root{
+    --card-w:56px;
+    --card-h:calc(var(--card-w) * 4 / 3);
+    --tableau-gap:6px;
+    --card-vertical-spacing:10px;
+  }
+  .tableau{gap:6px}
+}
