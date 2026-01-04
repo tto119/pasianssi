@@ -201,16 +201,6 @@ function onTableCardClick(pileIdx, cardIdx){
   state.selected = {zone:'table', idx:pileIdx, cardIdx}; render();
 }
 
-function onEmptyTableClick(pileIdx, e){
-  // if a selection exists, try to move there
-  if(!state.selected) return;
-  if(state.selected.zone==='table'){
-    moveTableToTable(state.selected.idx, state.selected.cardIdx, pileIdx);
-  } else if(state.selected.zone==='waste'){
-    moveWasteToTable(pileIdx);
-  }
-}
-
 // Click on waste to select
 wasteEl.addEventListener('click', ()=>{
   if(state.waste.length===0) return;
@@ -223,12 +213,48 @@ wasteEl.addEventListener('dblclick', ()=>{ autoMoveWasteToFoundation(); });
 // Pointer down on waste to start drag
 wasteEl.addEventListener('pointerdown', (e)=> onWastePointerDown(e));
 
-// foundations clickable (move selected to foundations)
+// foundations clickable (move selected to foundations OR select for table move)
 foundationsEl.addEventListener('click', (e)=>{
   const fEl = e.target.closest('.foundation'); if(!fEl) return;
   const idx = Number(fEl.dataset.index);
-  if(state.selected?.zone==='waste') moveWasteToFoundation(idx);
-  if(state.selected?.zone==='table') moveTableToFoundation(state.selected.idx, state.selected.cardIdx, idx);
+  
+  // Jos on jo valittu kortti, yritetään siirtää se foundationiin (kuten ennen)
+  if (state.selected) {
+    if(state.selected.zone==='waste') moveWasteToFoundation(idx);
+    if(state.selected.zone==='table') moveTableToFoundation(state.selected.idx, state.selected.cardIdx, idx);
+    return;
+  }
+
+  // Jos ei valintaa, valitaan foundationin päällimmäinen kortti siirrettäväksi tableauhun
+  if (state.foundations[idx].length > 0) {
+    state.selected = { zone: 'foundation', idx: idx };
+    render();
+  }
+});
+
+// Lisätään raahausmahdollisuus foundationista
+foundationsEl.addEventListener('pointerdown', (e) => {
+  const fEl = e.target.closest('.foundation');
+  if (!fEl) return;
+  const idx = Number(fEl.dataset.index);
+  const pile = state.foundations[idx];
+  if (pile.length === 0) return;
+
+  dragState = {
+    from: 'foundation',
+    fIdx: idx,
+    seq: [{ card: pile[pile.length - 1], faceUp: true }],
+    startX: e.clientX,
+    startY: e.clientY,
+    dragging: false,
+    layer: null,
+    removed: null
+  };
+  
+  state.selected = null;
+  window.addEventListener('pointermove', onDragPointerMove);
+  window.addEventListener('pointerup', onDragPointerUp);
+  e.target.setPointerCapture?.(e.pointerId);
 });
 
 // --- Drag & drop (pointer-based) ---
@@ -293,6 +319,10 @@ function beginDrag(){
   } else if(dragState.from==='waste'){
     const card = state.waste.pop();
     dragState.removed = {type:'waste', card};
+    render();
+  } else if(dragState.from==='foundation'){
+    const card = state.foundations[dragState.fIdx].pop();
+    dragState.removed = {type:'foundation', fIdx: dragState.fIdx, card};
     render();
   }
 }
@@ -361,8 +391,16 @@ function onDragPointerUp(e){
             state.table[idx].push({card, faceUp:true});
             state.selected=null; moved=true;
           } else {
-            // restore to waste
             state.waste.push(card);
+          }
+        } else if(dragState.from==='foundation'){
+          const card = dragState.removed.card;
+          if(canPlaceOnTable(card, state.table[idx])){
+            state.history.push({type:'move', from:{zone:'foundation', idx:dragState.fIdx}, to:{zone:'table', idx}, card});
+            state.table[idx].push({card, faceUp:true});
+            state.selected=null; moved=true;
+          } else {
+            state.foundations[dragState.fIdx].push(card);
           }
         }
       }
@@ -412,13 +450,15 @@ function onDragPointerUp(e){
           }
         }
 
-        // Jos drag peruttiin (ei validia siirtoa), palautetaan kortit alkuperäiseen paikkaan
+        // Jos drag peruttiin
         if(dragState.removed && !moved){
           if(dragState.removed.type === 'table'){
             const r = dragState.removed;
             state.table[r.pileIdx] = state.table[r.pileIdx].concat(r.removedCards);
           } else if(dragState.removed.type === 'waste'){
             state.waste.push(dragState.removed.card);
+          } else if(dragState.removed.type === 'foundation'){
+            state.foundations[dragState.removed.fIdx].push(dragState.removed.card);
           }
         }
 
@@ -556,47 +596,65 @@ function canPlaceOnFoundation(card, foundation){
 
 function rankValue(r){ if(r==='A') return 1; if(r==='J') return 11; if(r==='Q') return 12; if(r==='K') return 13; return Number(r); }
 
-function undo(){
-  const h = state.history.pop(); if(!h) return;
-  // simple undo handling for moves/draw
-  if(h.type==='draw'){
-    state.stock.push(h.card); state.waste.pop();
-  } else if(h.type==='recycle'){
-    state.waste = state.stock.reverse().map(c=>c); state.stock=[];
-  } else if(h.type==='move'){
-    // naive reversing for two cases
-    if(h.from==='waste'){
-      // moved from waste to somewhere
-      if(h.to.zone==='table'){
-        state.table[h.to.idx].pop(); state.waste.push(h.card);
-      } else if(h.to.zone==='foundation'){
-        state.foundations[h.to.idx].pop(); state.waste.push(h.card); state.score-=10;
+    function onEmptyTableClick(pileIdx, e){
+      // if a selection exists, try to move there
+      if(!state.selected) return;
+      if(state.selected.zone==='table'){
+        moveTableToTable(state.selected.idx, state.selected.cardIdx, pileIdx);
+      } else if(state.selected.zone==='waste'){
+        moveWasteToTable(pileIdx);
+      } else if(state.selected.zone==='foundation'){
+        moveFoundationToTable(state.selected.idx, pileIdx);
       }
-    } else if(h.from.zone==='table' && h.to.zone==='table'){
-      const moved = state.table[h.to.idx].splice(state.table[h.to.idx].length - h.cards.length, h.cards.length);
-      // Jos edellinen kortti käännettiin automaattisesti, käännetään se takaisin piiloon
-      const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
-      if (last && last.wasAutoFlipped) { // Tarvitset lipun tälle
-          last.faceUp = false;
-          delete last.wasAutoFlipped;
-      }
-      state.table[h.from.idx] = state.table[h.from.idx].concat(moved);
-      state.score-=5;
-    } else if(h.from.zone==='table' && h.to.zone==='foundation'){
-      const card = state.foundations[h.to.idx].pop();
-      // Tarkistetaan kääntö täälläkin
-      const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
-      if (last && last.wasAutoFlipped) {
-          last.faceUp = false;
-          delete last.wasAutoFlipped;
-      }
-      state.table[h.from.idx].push({card: card, faceUp:true}); 
-      state.score-=10;
     }
-  }
-  render();
-}
 
-// Simple helper: clicking on a foundation's top card could try to move it somewhere - omitted for brevity
+    function moveFoundationToTable(fIdx, pileIdx) {
+      const pile = state.foundations[fIdx];
+      const card = pile[pile.length - 1];
+      if (card && canPlaceOnTable(card, state.table[pileIdx])) {
+        state.history.push({type:'move', from:{zone:'foundation', idx:fIdx}, to:{zone:'table', idx:pileIdx}, card});
+        state.foundations[fIdx].pop();
+        state.table[pileIdx].push({card, faceUp: true});
+        state.selected = null;
+        render();
+      }
+    }
 
-// Note: This is an initial, minimal playable implementation. Improvements: drag-and-drop, auto-move to foundations, better undo, win detection, animations, sound, tests.
+    function undo(){
+      const h = state.history.pop(); if(!h) return;
+      if(h.type==='draw'){
+        state.stock.push(h.card); state.waste.pop();
+      } else if(h.type==='recycle'){
+        state.waste = state.stock.reverse().map(c=>c); state.stock=[];
+      } else if(h.type==='move'){
+        if(h.from==='waste'){
+          if(h.to.zone==='table'){
+            state.table[h.to.idx].pop(); state.waste.push(h.card);
+          } else if(h.to.zone==='foundation'){
+            state.foundations[h.to.idx].pop(); state.waste.push(h.card); state.score-=10;
+          }
+        } else if(h.from.zone==='table' && h.to.zone==='table'){
+          const moved = state.table[h.to.idx].splice(state.table[h.to.idx].length - h.cards.length, h.cards.length);
+          const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
+          if (last && last.wasAutoFlipped) {
+              last.faceUp = false;
+              delete last.wasAutoFlipped;
+          }
+          state.table[h.from.idx] = state.table[h.from.idx].concat(moved);
+          state.score-=5;
+        } else if(h.from.zone==='table' && h.to.zone==='foundation'){
+          const card = state.foundations[h.to.idx].pop();
+          const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
+          if (last && last.wasAutoFlipped) {
+              last.faceUp = false;
+              delete last.wasAutoFlipped;
+          }
+          state.table[h.from.idx].push({card: card, faceUp:true}); 
+          state.score-=10;
+        } else if(h.from.zone==='foundation' && h.to.zone==='table'){
+          const card = state.table[h.to.idx].pop();
+          state.foundations[h.from.idx].push(card);
+        }
+      }
+      render();
+    }
