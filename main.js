@@ -157,7 +157,14 @@ function processPendingFlips(){
   });
 }
 
-function cardHtml(c){ return `<div class="card ${isRed(c)?'red':'black'}"><div class="rank">${c.rank}</div><div class="suit">${c.suit}</div></div>` }
+function cardHtml(c){ 
+      return `
+        <div class="card ${isRed(c)?'red':'black'}">
+          <div class="rank">${c.rank}</div>
+          <div class="suit-large">${c.suit}</div>
+          <div class="suit" style="align-self: flex-end; transform: rotate(180deg)">${c.suit}</div>
+        </div>` 
+    }
 function isRed(c){ return c.suit==='♥' || c.suit==='♦' }
 
 function drawFromStock(){
@@ -268,30 +275,20 @@ function beginDrag(){
     layer.appendChild(clone);
   });
 
-  // clear any existing selection so dragged cards aren't also visually selected
+  // Tyhjennetään valinta
   state.selected = null;
   document.querySelectorAll('.selected').forEach(n=>n.classList.remove('selected'));
 
-  // Temporarily remove the dragged cards from the source STATE so the card underneath becomes visible immediately.
-  // Keep the removed cards in dragState.removed so we can finalize the move or restore them on cancel.
+  // Poistetaan VAIN siirrettävät kortit lähdepakasta
   if(dragState.from==='table'){
     const pileIdx = dragState.pileIdx;
     const cardIdx = dragState.cardIdx;
     const removedCards = state.table[pileIdx].slice(cardIdx);
-    const underneath = state.table[pileIdx][cardIdx - 1];
-    // If the underlying card is facedown, temporarily remove it as well so nothing is revealed during drag
-    dragState.removed = {type:'table', pileIdx, cardIdx, removedCards, flippedUnder: false, underneath: null};
-    if(underneath && !underneath.faceUp){
-      dragState.removed.underneath = underneath;
-      dragState.removed.flippedUnder = true;
-      // remove both the underneath card and the dragged sequence from state
-      state.table[pileIdx] = state.table[pileIdx].slice(0, cardIdx - 1);
-    } else {
-      // remove just the dragged sequence
-      state.table[pileIdx] = state.table[pileIdx].slice(0, cardIdx);
-    }
+    
+    dragState.removed = {type:'table', pileIdx, cardIdx, removedCards};
+    state.table[pileIdx] = state.table[pileIdx].slice(0, cardIdx);
+    
     render();
-    // small synchronous read to ensure DOM update occurs promptly
     void tableauEl.offsetHeight;
   } else if(dragState.from==='waste'){
     const card = state.waste.pop();
@@ -404,25 +401,29 @@ function onDragPointerUp(e){
     // remove highlights
     document.querySelectorAll('.drop-target').forEach(n=>n.classList.remove('drop-target'));
 
-    // If the drag was cancelled (no valid move), ensure removed cards (and any removed underneath card) are restored
-    if(dragState.removed && !moved){
-      if(dragState.removed.type === 'table'){
-        const r = dragState.removed;
-        if(r.underneath) state.table[r.pileIdx].push(r.underneath);
-        state.table[r.pileIdx] = state.table[r.pileIdx].concat(r.removedCards);
-      } else if(dragState.removed.type === 'waste'){
-        state.waste.push(dragState.removed.card);
-      }
-    }
+        // Jos siirto onnistui ja paljastimme aiemmin piilossa olleen kortin, käänetään se
+        if(moved && dragState.from === 'table'){
+          const sourcePile = state.table[dragState.pileIdx];
+          const last = sourcePile[sourcePile.length - 1];
+          if(last && !last.faceUp){
+            last.faceUp = true;
+            last.wasAutoFlipped = true;
+            pendingFlips.push(dragState.pileIdx);
+          }
+        }
 
-    // If the move succeeded and we revealed a previously-facedown card, queue the pile for flip animation
-    if(dragState.removed && moved && dragState.removed.type === 'table' && dragState.removed.flippedUnder){
-      const r = dragState.removed;
-      if(typeof r.pileIdx === 'number') pendingFlips.push(r.pileIdx);
-    }
+        // Jos drag peruttiin (ei validia siirtoa), palautetaan kortit alkuperäiseen paikkaan
+        if(dragState.removed && !moved){
+          if(dragState.removed.type === 'table'){
+            const r = dragState.removed;
+            state.table[r.pileIdx] = state.table[r.pileIdx].concat(r.removedCards);
+          } else if(dragState.removed.type === 'waste'){
+            state.waste.push(dragState.removed.card);
+          }
+        }
 
-    // cleanup layer and re-render final state
-    dragState.layer.remove(); dragState=null; render();
+        // cleanup layer and re-render final state
+        dragState.layer.remove(); dragState=null; render();
 
     // also clear any native selection ranges and blur focused elements to remove lingering highlights
     try{ window.getSelection()?.removeAllRanges(); }catch(e){}
@@ -471,7 +472,12 @@ function moveTableToFoundation(fromPile, cardIdx, fIdx){
     state.history.push({type:'move',from:{zone:'table',idx:fromPile},to:{zone:'foundation',idx:fIdx},card:c});
     state.table[fromPile].pop(); // remove last
     // flip last card if necessary and queue animation
-    const last = state.table[fromPile][state.table[fromPile].length-1]; if(last && !last.faceUp){ last.faceUp=true; pendingFlips.push(fromPile); }
+    const last = state.table[fromPile][state.table[fromPile].length-1];
+if(last && !last.faceUp) {
+    last.faceUp = true;
+    last.wasAutoFlipped = true; // Merkitse muistiin undo-toimintoa varten
+    pendingFlips.push(fromPile);
+}
     state.foundations[fIdx].push(c); state.selected=null; state.score+=10; render();
   } else {
     console.log('moveTableToFoundation denied:', c, '->', state.foundations[fIdx]);
@@ -568,10 +574,24 @@ function undo(){
       }
     } else if(h.from.zone==='table' && h.to.zone==='table'){
       const moved = state.table[h.to.idx].splice(state.table[h.to.idx].length - h.cards.length, h.cards.length);
+      // Jos edellinen kortti käännettiin automaattisesti, käännetään se takaisin piiloon
+      const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
+      if (last && last.wasAutoFlipped) { // Tarvitset lipun tälle
+          last.faceUp = false;
+          delete last.wasAutoFlipped;
+      }
       state.table[h.from.idx] = state.table[h.from.idx].concat(moved);
       state.score-=5;
     } else if(h.from.zone==='table' && h.to.zone==='foundation'){
-      state.foundations[h.to.idx].pop(); state.table[h.from.idx].push({card:h.card, faceUp:true}); state.score-=10;
+      const card = state.foundations[h.to.idx].pop();
+      // Tarkistetaan kääntö täälläkin
+      const last = state.table[h.from.idx][state.table[h.from.idx].length - 1];
+      if (last && last.wasAutoFlipped) {
+          last.faceUp = false;
+          delete last.wasAutoFlipped;
+      }
+      state.table[h.from.idx].push({card: card, faceUp:true}); 
+      state.score-=10;
     }
   }
   render();
