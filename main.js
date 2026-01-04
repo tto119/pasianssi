@@ -22,6 +22,9 @@ const state = {
   history:[], score:0
 }
 
+// Queue of pile indices to animate flips for after render
+const pendingFlips = [];
+
 // DOM refs
 const stockEl = document.getElementById('stock');
 const wasteEl = document.getElementById('waste');
@@ -97,11 +100,14 @@ function render(){
       node.style.left = '0px';
       node.style.top = (sidx * offset) + 'px';
       node.style.zIndex = sidx;
+
       if(slot.faceUp){
         node.innerHTML = `<div class="rank">${slot.card.rank}</div><div class="suit">${slot.card.suit}</div>`;
         node.addEventListener('click', ()=> onTableCardClick(idx, sidx));
         node.addEventListener('dblclick', ()=> onTableCardDblClick(idx, sidx));
         node.addEventListener('pointerdown', (e)=> onCardPointerDown(idx, sidx, e));
+
+
       }
       el.appendChild(node);
     });
@@ -121,6 +127,34 @@ function render(){
 
   scoreEl.textContent = `Pisteet: ${state.score}`;
   undoBtn.disabled = state.history.length===0;
+
+  // After render, run any queued flip animations
+  processPendingFlips();
+}
+
+function processPendingFlips(){
+  if(!pendingFlips.length) return;
+  const toAnimate = Array.from(new Set(pendingFlips.splice(0, pendingFlips.length)));
+  // Schedule animation to next frame so DOM updates/paint have completed
+  requestAnimationFrame(()=>{
+    // force layout so the browser paints the newly revealed card(s) before animating
+    void tableauEl.offsetHeight;
+    toAnimate.forEach(pileIdx => {
+      const pileEl = tableauEl.querySelectorAll('.pile')[pileIdx];
+      if(!pileEl) return;
+      const cardNodes = pileEl.querySelectorAll('.card');
+      if(!cardNodes.length) return;
+      const node = cardNodes[cardNodes.length - 1];
+      // prepare for animation
+      node.style.willChange = 'transform';
+      node.style.transform = 'rotateY(180deg)';
+      requestAnimationFrame(()=>{
+        node.classList.add('flip-anim');
+        node.style.transform = '';
+        node.addEventListener('transitionend', function te(){ node.classList.remove('flip-anim'); node.style.willChange = ''; node.removeEventListener('transitionend', te); });
+      });
+    });
+  });
 }
 
 function cardHtml(c){ return `<div class="card ${isRed(c)?'red':'black'}"><div class="rank">${c.rank}</div><div class="suit">${c.suit}</div></div>` }
@@ -238,19 +272,31 @@ function beginDrag(){
   state.selected = null;
   document.querySelectorAll('.selected').forEach(n=>n.classList.remove('selected'));
 
-  // Temporarily remove the dragged elements from the source DOM so the card(s) underneath are visible
+  // Temporarily remove the dragged cards from the source STATE so the card underneath becomes visible immediately.
+  // Keep the removed cards in dragState.removed so we can finalize the move or restore them on cancel.
   if(dragState.from==='table'){
-    const pileEl = tableauEl.querySelectorAll('.pile')[dragState.pileIdx];
-    dragState.removed = {type:'table', pileIdx: dragState.pileIdx, removedHtml: []};
-    // remove children from cardIdx to end and keep their HTML to restore if needed
-    for(let i = pileEl.children.length - 1; i >= dragState.cardIdx; i--){
-      const child = pileEl.children[i];
-      dragState.removed.removedHtml.unshift(child.outerHTML);
-      pileEl.removeChild(child);
+    const pileIdx = dragState.pileIdx;
+    const cardIdx = dragState.cardIdx;
+    const removedCards = state.table[pileIdx].slice(cardIdx);
+    const underneath = state.table[pileIdx][cardIdx - 1];
+    // If the underlying card is facedown, temporarily remove it as well so nothing is revealed during drag
+    dragState.removed = {type:'table', pileIdx, cardIdx, removedCards, flippedUnder: false, underneath: null};
+    if(underneath && !underneath.faceUp){
+      dragState.removed.underneath = underneath;
+      dragState.removed.flippedUnder = true;
+      // remove both the underneath card and the dragged sequence from state
+      state.table[pileIdx] = state.table[pileIdx].slice(0, cardIdx - 1);
+    } else {
+      // remove just the dragged sequence
+      state.table[pileIdx] = state.table[pileIdx].slice(0, cardIdx);
     }
+    render();
+    // small synchronous read to ensure DOM update occurs promptly
+    void tableauEl.offsetHeight;
   } else if(dragState.from==='waste'){
-    dragState.removed = {type:'waste', html: wasteEl.innerHTML};
-    wasteEl.innerHTML = '';
+    const card = state.waste.pop();
+    dragState.removed = {type:'waste', card};
+    render();
   }
 }
 function onDragPointerMove(e){
@@ -288,15 +334,39 @@ function onDragPointerUp(e){
     const el = document.elementFromPoint(e.clientX, e.clientY);
     const pileEl = el?.closest('.pile');
     let moved=false;
+
     if(pileEl){
       const piles = Array.from(tableauEl.querySelectorAll('.pile'));
       const idx = piles.indexOf(pileEl);
       if(idx >= 0){
+        // Finalize move using the temporarily-removed cards stored in dragState.removed
         if(dragState.from==='table'){
-          moveTableToTable(dragState.pileIdx, dragState.cardIdx, idx);
-          moved=true;
+          const removed = dragState.removed;
+          const seq = removed?.removedCards || dragState.seq;
+          const firstCard = seq[0].card;
+          if(canPlaceOnTable(firstCard, state.table[idx])){
+            state.history.push({type:'move',from:{zone:'table',idx:removed.pileIdx,cardIdx:removed.cardIdx},to:{zone:'table',idx},cards:seq.map(s=>s.card)});
+            state.table[idx] = state.table[idx].concat(seq);
+            // If we had temporarily removed an underneath facedown card, place it back and flip it now
+            if(removed.underneath){
+              removed.underneath.faceUp = true;
+              state.table[removed.pileIdx].push(removed.underneath);
+              pendingFlips.push(removed.pileIdx);
+            }
+            state.selected = null; state.score += 5; moved = true;
+          } else {
+            // invalid drop: do nothing here, we'll restore after checking moved flag
+          }
         } else if(dragState.from==='waste'){
-          moveWasteToTable(idx); moved=true;
+          const card = dragState.removed.card;
+          if(canPlaceOnTable(card, state.table[idx])){
+            state.history.push({type:'move',from:'waste',to:{zone:'table',idx},card});
+            state.table[idx].push({card, faceUp:true});
+            state.selected=null; moved=true;
+          } else {
+            // restore to waste
+            state.waste.push(card);
+          }
         }
       }
     } else {
@@ -304,21 +374,56 @@ function onDragPointerUp(e){
       if(fEl && dragState.seq.length===1){
         const idx = Number(fEl.dataset.index);
         if(dragState.from==='table'){
-          moveTableToFoundation(dragState.pileIdx, dragState.cardIdx, idx); moved=true;
+          const removed = dragState.removed;
+          const card = removed?.removedCards[0].card || dragState.seq[0].card;
+          if(canPlaceOnFoundation(card, state.foundations[idx])){
+            state.history.push({type:'move',from:{zone:'table',idx:removed.pileIdx},to:{zone:'foundation',idx},card});
+            state.foundations[idx].push(card);
+            // If we had temporarily removed an underneath facedown card, place it back and flip it now
+            if(removed.underneath){
+              removed.underneath.faceUp = true;
+              state.table[removed.pileIdx].push(removed.underneath);
+              pendingFlips.push(removed.pileIdx);
+            }
+            state.selected=null; state.score+=10; moved=true;
+          } else {
+            // invalid drop: do nothing here, we'll restore after checking moved flag
+          }
         } else if(dragState.from==='waste'){
-          moveWasteToFoundation(idx); moved=true;
+          const card = dragState.removed.card;
+          if(canPlaceOnFoundation(card, state.foundations[idx])){
+            state.history.push({type:'move',from:'waste',to:{zone:'foundation',idx},card});
+            state.foundations[idx].push(card); state.selected=null; state.score+=10; moved=true;
+          } else {
+            state.waste.push(card);
+          }
         }
       }
     }
-    // remove highlights and layer
+
+    // remove highlights
     document.querySelectorAll('.drop-target').forEach(n=>n.classList.remove('drop-target'));
-    // If we temporarily removed DOM nodes, restore (render will handle state restoration or final layout)
-    if(dragState.removed){
-      // simply re-render to restore DOM according to current state (if moved, state already changed, else this restores)
-      dragState.layer.remove(); dragState=null; render();
-    } else {
-      dragState.layer.remove(); dragState=null; render();
+
+    // If the drag was cancelled (no valid move), ensure removed cards (and any removed underneath card) are restored
+    if(dragState.removed && !moved){
+      if(dragState.removed.type === 'table'){
+        const r = dragState.removed;
+        if(r.underneath) state.table[r.pileIdx].push(r.underneath);
+        state.table[r.pileIdx] = state.table[r.pileIdx].concat(r.removedCards);
+      } else if(dragState.removed.type === 'waste'){
+        state.waste.push(dragState.removed.card);
+      }
     }
+
+    // If the move succeeded and we revealed a previously-facedown card, queue the pile for flip animation
+    if(dragState.removed && moved && dragState.removed.type === 'table' && dragState.removed.flippedUnder){
+      const r = dragState.removed;
+      if(typeof r.pileIdx === 'number') pendingFlips.push(r.pileIdx);
+    }
+
+    // cleanup layer and re-render final state
+    dragState.layer.remove(); dragState=null; render();
+
     // also clear any native selection ranges and blur focused elements to remove lingering highlights
     try{ window.getSelection()?.removeAllRanges(); }catch(e){}
     try{ document.activeElement?.blur(); }catch(e){}
@@ -365,8 +470,8 @@ function moveTableToFoundation(fromPile, cardIdx, fIdx){
   if(canPlaceOnFoundation(c, state.foundations[fIdx])){
     state.history.push({type:'move',from:{zone:'table',idx:fromPile},to:{zone:'foundation',idx:fIdx},card:c});
     state.table[fromPile].pop(); // remove last
-    // flip last card if necessary
-    const last = state.table[fromPile][state.table[fromPile].length-1]; if(last && !last.faceUp) last.faceUp=true;
+    // flip last card if necessary and queue animation
+    const last = state.table[fromPile][state.table[fromPile].length-1]; if(last && !last.faceUp){ last.faceUp=true; pendingFlips.push(fromPile); }
     state.foundations[fIdx].push(c); state.selected=null; state.score+=10; render();
   } else {
     console.log('moveTableToFoundation denied:', c, '->', state.foundations[fIdx]);
